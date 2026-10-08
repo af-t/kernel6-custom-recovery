@@ -59,6 +59,10 @@ class TestPatchVendorBoot(unittest.TestCase):
         with self.assertRaises(ValueError):
             pvb.parse(b"NOTABOOT" + b"\0" * 5000)
 
+    def test_extract_returns_recovery_fragment(self):
+        img = make_image([b"A" * 5000, b"B" * 3000])
+        self.assertEqual(pvb.extract(img), b"B" * 3000)
+
 
 if __name__ == "__main__":
     unittest.main()

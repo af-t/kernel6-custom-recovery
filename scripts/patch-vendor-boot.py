@@ -2,6 +2,7 @@
 """Replace the RECOVERY ramdisk fragment of a stock vendor_boot v4 image.
 
 Usage: patch-vendor-boot.py <stock.img> <recovery-frag.bin> <out.img>
+       patch-vendor-boot.py --extract <stock.img> <out-frag.bin>
 
 Reads <stock.img>, swaps the single type-2 (RECOVERY) fragment with the
 bytes from <recovery-frag.bin>, rebuilds the container and writes <out.img>.
@@ -91,9 +92,25 @@ def repack(stock, new_recovery):
     return out, p["entries"][idx[0]][0]
 
 
+def extract(stock):
+    p = parse(stock)
+    idx = [i for i, e in enumerate(p["entries"]) if e[2] == RECOVERY_TYPE]
+    if len(idx) != 1:
+        raise ValueError(f"expected 1 RECOVERY fragment, found {len(idx)}")
+    e = p["entries"][idx[0]]
+    start = PAGE + e[1]
+    return stock[start:start + e[0]]
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "--extract":
+        blob = extract(open(argv[2], "rb").read())
+        open(argv[3], "wb").write(blob)
+        print(f"extracted recovery fragment: {len(blob)} bytes")
+        return
     if len(argv) != 4:
-        sys.exit("usage: patch-vendor-boot.py <stock.img> <recovery-frag.bin> <out.img>")
+        sys.exit("usage: patch-vendor-boot.py <stock.img> <recovery-frag.bin> <out.img>\n"
+                 "       patch-vendor-boot.py --extract <stock.img> <out-frag.bin>")
     stock = open(argv[1], "rb").read()
     blob = open(argv[2], "rb").read()
     out, old_size = repack(stock, blob)

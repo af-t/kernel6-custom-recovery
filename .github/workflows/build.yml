@@ -1,0 +1,102 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      fragment_release:
+        description: "Release tag hosting a custom recovery fragment blob (empty = no-op pipeline test)"
+        required: false
+        default: ""
+      fragment_asset:
+        description: "Asset name of the custom recovery fragment blob"
+        required: false
+        default: ""
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [X6885, X6886]
+    env:
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve variant config
+        run: |
+          python3 -c "
+          import json
+          c = json.load(open('config/devices.json'))
+          v = c['variants']['${{ matrix.variant }}']
+          open('$GITHUB_ENV', 'a').write(
+            f\"STOCK_TAG={c['stock_release']}\n\"
+            f\"STOCK_ASSET={v['stock_asset']}\n\"
+            f\"DEVICE_A={v['device_names'][0]}\n\"
+            f\"DEVICE_B={v['device_names'][1]}\n\"
+          )"
+
+      - name: Download stock image
+        run: |
+          curl -sL -o stock.img "https://github.com/$REPO/releases/download/$STOCK_TAG/$STOCK_ASSET"
+          ls -la stock.img
+
+      - name: Extract stock recovery fragment
+        run: python3 scripts/patch-vendor-boot.py --extract stock.img frag-stock.bin
+
+      - name: Select recovery fragment
+        run: |
+          if [ -n "${{ inputs.fragment_asset }}" ]; then
+            curl -sL -o frag-custom.bin "https://github.com/$REPO/releases/download/${{ inputs.fragment_release }}/${{ inputs.fragment_asset }}"
+            cp frag-custom.bin frag.bin
+          else
+            cp frag-stock.bin frag.bin
+          fi
+          ls -la frag.bin
+
+      - name: Patch vendor_boot
+        run: python3 scripts/patch-vendor-boot.py stock.img frag.bin vendor_boot.img
+
+      - name: Assemble AnyKernel3 zip
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3
+          sed -e "s/__VARIANT__/${{ matrix.variant }}/g" \
+              -e "s/__DEVICE_A__/$DEVICE_A/g" \
+              -e "s/__DEVICE_B__/$DEVICE_B/g" \
+              anykernel/anykernel.sh > ak3/anykernel.sh
+          cp vendor_boot.img ak3/vendor_boot.img
+          bash -n ak3/anykernel.sh
+          grep -c "__VARIANT__\|__DEVICE_" ak3/anykernel.sh && exit 1 || true
+          (cd ak3 && zip -r9 "../kernel6-custom-recovery-${{ matrix.variant }}-${GITHUB_SHA::8}.zip" . -x ".git/*")
+          unzip -l "kernel6-custom-recovery-${{ matrix.variant }}-${GITHUB_SHA::8}.zip" | head -n 20
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel6-custom-recovery-${{ matrix.variant }}
+          path: "kernel6-custom-recovery-${{ matrix.variant }}-*.zip"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        run: gh release create "${{ github.ref_name }}" artifacts/*/*.zip --title "${{ github.ref_name }}" --notes "Patched vendor_boot for X6885/X6886. Requires vbmeta verification disabled (flash from Magisk/KSU/KSU-Next or an existing custom recovery)."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

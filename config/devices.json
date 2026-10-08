@@ -1,0 +1,8 @@
+{
+  "stock_release": "stock",
+  "partition_size": 67108864,
+  "variants": {
+    "X6885": { "stock_asset": "vendor_boot-X6885-stock.img", "device_names": ["Infinix-X6885", "x6885_h8923"] },
+    "X6886": { "stock_asset": "vendor_boot-X6886-stock.img", "device_names": ["Infinix-X6886", "x6886_h8921"] }
+  }
+}

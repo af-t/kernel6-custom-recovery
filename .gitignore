@@ -1,3 +1,4 @@
 /scratch
 /target # rust cache
 *.o     # C/C++ cache
+__pycache__/
