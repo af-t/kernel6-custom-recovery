@@ -1,0 +1,83 @@
+name: verify-magiskboot
+
+# TEMPORARY cross-check: our pure-Python repack vs magiskboot (reference tool).
+# Runs only on manual dispatch from a throwaway branch. Deleted after verdict.
+on: workflow_dispatch
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch magiskboot (pinned Magisk v30.7 APK, x86_64)
+        run: |
+          curl -sL -o magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk
+          python3 -c "import zipfile; zipfile.ZipFile('magisk.apk').extract('lib/x86_64/libmagiskboot.so')"
+          mv lib/x86_64/libmagiskboot.so magiskboot && chmod +x magiskboot
+          rm -rf lib magisk.apk
+          ./magiskboot 2>&1 | head -n 3 || true
+
+      - name: Cross-check per variant
+        run: |
+          : > compare.log
+          for V in X6885 X6886; do
+            echo "===== $V =====" | tee -a compare.log
+            mkdir -p work-$V && cd work-$V
+            curl -sL -o stock.img "https://github.com/${{ github.repository }}/releases/download/stock/vendor_boot-$V-stock.img"
+            sha256sum stock.img | tee -a ../compare.log
+            echo "--- magiskboot header dump ---" | tee -a ../compare.log
+            ../magiskboot unpack -h stock.img 2>&1 | tee -a ../compare.log || true
+            echo "--- magiskboot unpack stock ---" | tee -a ../compare.log
+            mkdir -p mb && (cd mb && ../../magiskboot unpack ../stock.img 2>&1 | tee -a ../../compare.log || true)
+            ls -la mb | tee -a ../compare.log
+            sha256sum mb/* 2>/dev/null | tee -a ../compare.log || true
+            echo "--- magiskboot repack (no-op) ---" | tee -a ../compare.log
+            (cd mb && ../../magiskboot repack ../stock.img ../out-magiskboot.img 2>&1 | tee -a ../../compare.log || true)
+            ls -la out-magiskboot.img 2>/dev/null | tee -a ../compare.log || echo "MAGISKBOOT REPACK FAILED" | tee -a ../compare.log
+            echo "--- ours: extract + no-op repack ---" | tee -a ../compare.log
+            python3 ../scripts/patch-vendor-boot.py --extract stock.img frag.bin 2>&1 | tee -a ../compare.log
+            python3 ../scripts/patch-vendor-boot.py stock.img frag.bin out-ours.img 2>&1 | tee -a ../compare.log
+            echo "--- magiskboot unpacks OUR image? ---" | tee -a ../compare.log
+            mkdir -p mb-ours && (cd mb-ours && ../../magiskboot unpack ../out-ours.img 2>&1 | tee -a ../../compare.log || true)
+            ls -la mb-ours | tee -a ../compare.log
+            sha256sum mb-ours/* 2>/dev/null | tee -a ../compare.log || true
+            cd ..
+          done
+          echo "===== compare.log done ====="
+
+      - name: Field-level diff (both repacks, both variants)
+        run: |
+          python3 - <<'EOF' | tee -a compare.log
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('pvb', 'scripts/patch-vendor-boot.py')
+          pvb = importlib.util.module_from_spec(spec); spec.loader.exec_module(pvb)
+          for v in ['X6885', 'X6886']:
+            print(f'===== {v} field diff: ours vs magiskboot =====')
+            try:
+              a = open(f'work-{v}/out-ours.img','rb').read()
+              b = open(f'work-{v}/out-magiskboot.img','rb').read()
+            except FileNotFoundError as e:
+              print('MISSING FILE:', e); continue
+            print(f'sizes: ours={len(a)} magiskboot={len(b)} stock_unsigned_region_ends_at={pvb.parse(a)["unsigned_end"]}')
+            try:
+              pa, pb = pvb.parse(a), pvb.parse(b)
+            except Exception as e:
+              print('PARSE FAILURE:', e); continue
+            print('header pages identical:', pa['header'] == pb['header'])
+            print('entries ours:', [(e[0], hex(e[1]), e[2], e[3]) for e in pa['entries']])
+            print('entries mb  :', [(e[0], hex(e[1]), e[2], e[3]) for e in pb['entries']])
+            print('dtb identical:', pa['dtb'] == pb['dtb'], f'({len(pa["dtb"])} vs {len(pb["dtb"])})')
+            print('bootconfig identical:', pa['bootconfig'] == pb['bootconfig'])
+            for i, (ea, eb) in enumerate(zip(pa['entries'], pb['entries'])):
+              fa = a[4096+ea[1]:4096+ea[1]+ea[0]]
+              fb = b[4096+eb[1]:4096+eb[1]+eb[0]]
+              print(f'frag{i} bytes identical:', fa == fb, f'({len(fa)} vs {len(fb)})')
+            print('full files byte-identical:', a == b)
+          EOF
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: magiskboot-crosscheck
+          path: compare.log
