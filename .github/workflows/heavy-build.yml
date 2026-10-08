@@ -28,8 +28,19 @@ jobs:
       contents: write
     env:
       SYNC_DIR: ${{ github.workspace }}/fox_sync
+      USE_CCACHE: "1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: heavy-ccache-${{ hashFiles('config/fox.json', 'patches/fox/**') }}
+          restore-keys: heavy-ccache-
 
       - name: Free disk space
         uses: easimon/maximize-build-space@master
@@ -44,7 +55,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential curl flex \
+          sudo apt-get install -y bc bison build-essential ccache curl flex \
             g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick \
             lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
             libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
@@ -76,6 +87,7 @@ jobs:
 
       - name: Build vendorbootimage per variant
         run: |
+          ccache -z
           cd "$SYNC_DIR"
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
@@ -98,9 +110,18 @@ jobs:
             echo "fox_json_sha=$(sha256sum config/fox.json | cut -d' ' -f1)"
             echo "variants=${{ inputs.variants }}"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "--- ccache stats ---"
+            ccache -s
           } > BuildInfo.txt
           cat BuildInfo.txt
           sha256sum vendor_boot-*-fox.img recovery-*.bin BuildInfo.txt | tee SHA256SUMS.txt
+
+      - name: Save compiler cache (even on failure)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: heavy-ccache-${{ hashFiles('config/fox.json', 'patches/fox/**') }}-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
