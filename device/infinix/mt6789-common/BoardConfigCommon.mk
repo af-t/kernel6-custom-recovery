@@ -48,6 +48,10 @@ BOARD_DTB_SIZE := 209018
 BOARD_DTB_OFFSET := 0x07c88000
 BOARD_VENDOR_BASE := 0x3fff8000
 BOARD_VENDOR_CMDLINE := bootopt=64S3,32N2,64N2
+BOARD_BOOTCONFIG := \
+    kernel.rcu_nocbs=all \
+    kernel.rcutree.enable_rcu_lazy=1 \
+    kernel.rcupdate.rcu_cpu_stall_cputime=1
 
 BOARD_MKBOOTIMG_ARGS += --dtb $(TARGET_PREBUILT_DTB)
 BOARD_MKBOOTIMG_ARGS += --vendor_cmdline $(BOARD_VENDOR_CMDLINE)

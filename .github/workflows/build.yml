@@ -56,8 +56,12 @@ jobs:
 
       - name: Select recovery fragment
         run: |
-          if [ -n "${{ inputs.fragment_asset }}" ]; then
-            curl -sL -o frag-custom.bin "https://github.com/$REPO/releases/download/${{ inputs.fragment_release }}/${{ inputs.fragment_asset }}"
+          FRAG_ASSET="${{ inputs.fragment_asset }}"
+          if [ -z "$FRAG_ASSET" ] && [ -n "${{ inputs.fragment_release }}" ]; then
+            FRAG_ASSET="recovery-${{ matrix.variant }}.bin"
+          fi
+          if [ -n "$FRAG_ASSET" ]; then
+            curl -sL -f -o frag-custom.bin "https://github.com/$REPO/releases/download/${{ inputs.fragment_release }}/$FRAG_ASSET"
             cp frag-custom.bin frag.bin
           else
             cp frag-stock.bin frag.bin

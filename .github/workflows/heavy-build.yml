@@ -29,36 +29,47 @@ jobs:
     env:
       SYNC_DIR: ${{ github.workspace }}/fox_sync
       USE_CCACHE: "1"
+      CCACHE_EXEC: /usr/bin/ccache
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 5G
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Restore compiler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: heavy-ccache-${{ hashFiles('config/fox.json', 'patches/fox/**') }}
           restore-keys: heavy-ccache-
 
-      - name: Free disk space
-        uses: easimon/maximize-build-space@master
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v4
         with:
-          root-reserve-mb: 8192
-          swap-size-mb: 8192
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rmz"
+          rmz_version: "3.2.0"
+          testing: false
+
+      - name: Setup Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex \
             g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick \
-            lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
-            libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
+            lib32readline-dev lib32z1-dev lz4 libncurses5-dev \
+            libsdl1.2-dev libssl-dev libxml2-utils lzop pngcrush \
             repo rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
           git config --global user.email "ci@${{ github.repository_owner }}.local"
           git config --global user.name "ci"
@@ -75,6 +86,9 @@ jobs:
             --no-clone-bundle --no-tags
           repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags --force-sync
           git -C .repo/manifests rev-parse HEAD > "$GITHUB_WORKSPACE/manifest.sha"
+          # Reclaim ~35GB: source is checked out, .repo is not needed for build.
+          rm -rf .repo
+          df -h /
 
       - name: Overlay device tree and Fox patches
         run: |
@@ -90,12 +104,26 @@ jobs:
           ccache -z
           cd "$SYNC_DIR"
           export ALLOW_MISSING_DEPENDENCIES=true
+          # Source Fox envsetup with errexit off: foreign vendorsetup.sh trips `bash -e`.
+          ls -l build/envsetup.sh
+          set +e
           source build/envsetup.sh
+          ENVSETUP_RC=$?
+          set -e
+          echo "envsetup exit: $ENVSETUP_RC"
+          [ "$ENVSETUP_RC" -eq 0 ]
           for V in ${{ inputs.variants }}; do
-            lunch "ofox_${V}-eng"
+            export FOX_BUILD_DEVICE="$V"
+            lunch "ofox_${V}-bp2a-eng" || {
+              echo "lunch ofox_${V}-bp2a-eng failed; products visible:"
+              grep -rh "PRODUCT_NAME" device/infinix/*/ofox_*.mk || true
+              exit 1
+            }
             m vendorbootimage
-            cp "out/target/product/${V}/vendor_boot.img" \
-              "$GITHUB_WORKSPACE/vendor_boot-${V}-fox.img"
+            ls "out/target/product/${V}/"
+            IMG=$(ls "out/target/product/${V}"/OrangeFox-*.img 2>/dev/null | head -n 1)
+            [ -z "$IMG" ] && IMG="out/target/product/${V}/vendor_boot.img"
+            cp "$IMG" "$GITHUB_WORKSPACE/vendor_boot-${V}-fox.img"
           done
 
       - name: Extract recovery fragments + BuildInfo
@@ -118,7 +146,7 @@ jobs:
 
       - name: Save compiler cache (even on failure)
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .ccache
           key: heavy-ccache-${{ hashFiles('config/fox.json', 'patches/fox/**') }}-${{ github.run_id }}
