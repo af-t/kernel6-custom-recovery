@@ -1,0 +1,15 @@
+{
+  "manifest": {
+    "url": "https://gitlab.com/OrangeFox/Manifest.git",
+    "branch": "fox_16.0",
+    "aosp_base": "android-16.0.0_r1"
+  },
+  "fox": {
+    "recovery_repo": "https://gitlab.com/OrangeFox/bootable/Recovery.git",
+    "recovery_branch": "fox_16.0",
+    "vendor_repo": "https://gitlab.com/OrangeFox/vendor/recovery.git",
+    "vendor_branch": "main"
+  },
+  "devices": ["X6885", "X6886"],
+  "patches_dir": "patches/fox"
+}

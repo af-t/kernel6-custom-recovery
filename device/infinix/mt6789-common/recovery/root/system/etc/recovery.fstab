@@ -1,0 +1,65 @@
+# Android fstab file - Infinix X6885/X6886 (MT6789/UFS), XOS16 stock values.
+# Logical partitions use TWRP shape (no avb_keys/first_stage_mount:
+# recovery neither verifies nor first-stage-mounts). All other flags
+# are verbatim from stock system/etc/recovery.fstab (X6885 == X6886).
+
+#<src>                          <mnt_point>         <type>  <mnt_flags and options>                                                    <fs_mgr_flags>
+# Logical partitions
+system                          /system             erofs   ro                                                                      wait,slotselect,logical
+system                          /system             ext4    ro                                                                      wait,slotselect,logical
+vendor                          /vendor             erofs   ro                                                                      wait,slotselect,logical
+vendor                          /vendor             ext4    ro                                                                      wait,slotselect,logical
+product                         /product            erofs   ro                                                                      wait,slotselect,logical
+product                         /product            ext4    ro                                                                      wait,slotselect,logical
+system_ext                      /system_ext         erofs   ro                                                                      wait,slotselect,logical
+system_ext                      /system_ext         ext4    ro                                                                      wait,slotselect,logical
+vendor_dlkm                     /vendor_dlkm        erofs   ro                                                                      wait,slotselect,logical
+vendor_dlkm                     /vendor_dlkm        ext4    ro                                                                      wait,slotselect,logical
+odm                             /odm                erofs   ro                                                                      wait,slotselect,logical
+odm                             /odm                ext4    ro                                                                      wait,slotselect,logical
+odm_dlkm                        /odm_dlkm           erofs   ro                                                                      wait,slotselect,logical
+odm_dlkm                        /odm_dlkm           ext4    ro                                                                      wait,slotselect,logical
+system_dlkm                     /system_dlkm        erofs   ro                                                                      wait,slotselect,logical
+system_dlkm                     /system_dlkm        ext4    ro                                                                      wait,slotselect,logical
+tr_region                       /tr_region          erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_region                       /tr_region          ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_company                      /tr_company         erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_company                      /tr_company         ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_carrier                      /tr_carrier         erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_carrier                      /tr_carrier         ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_product                      /tr_product         erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_product                      /tr_product         ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_preload                      /tr_preload         erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_preload                      /tr_preload         ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_overlayfs                    /tr_overlayfs       erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_overlayfs                    /tr_overlayfs       ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_misc                         /tr_misc            erofs   ro                                                                      wait,slotselect,logical,nofail
+tr_misc                         /tr_misc            ext4    ro                                                                      wait,slotselect,logical,nofail
+tr_manifest                     /mnt/vendor/tr_manifest erofs ro                                                                    wait,slotselect,logical
+tr_manifest                     /mnt/vendor/tr_manifest ext4 ro                                                                    wait,slotselect,logical
+/mnt/vendor/tr_manifest         /tr_manifest        none    ro,bind                                                                 wait,nofail
+
+# Metadata partition - must be formatted before userdata
+/dev/block/by-name/metadata     /metadata           ext4    noatime,nosuid,nodev,discard                                             wait,check,formattable
+
+# Userdata partition - stock line verbatim (noflush_merge, no whint_mode/sysfs_path)
+/dev/block/by-name/userdata     /data               f2fs    noatime,nosuid,nodev,discard,noflush_merge,fsync_mode=nobarrier,reserve_root=134217,resgid=1065,inlinecrypt wait,check,formattable,quota,latemount,resize,reservedsize=128m,checkpoint=fs,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized,keydirectory=/metadata/vold/metadata_encryption,fsverity
+/dev/block/by-name/userdata     /data               ext4    noatime,nosuid,nodev,inlinecrypt,errors=panic                           wait,check,quota,latemount,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized,keydirectory=/metadata/vold/metadata_encryption
+
+# Modem/NVRAM - stock lines verbatim
+/dev/block/by-name/protect1    /mnt/vendor/protect_f ext4  noatime,nosuid,nodev,noauto_da_alloc,commit=1,nodelalloc                  wait,check,formattable
+/dev/block/by-name/protect2    /mnt/vendor/protect_s ext4  noatime,nosuid,nodev,noauto_da_alloc,commit=1,nodelalloc                  wait,check,formattable
+/dev/block/by-name/nvdata      /mnt/vendor/nvdata   ext4    noatime,nosuid,nodev,noauto_da_alloc,commit=1,nodelalloc                  wait,check,formattable
+/dev/block/by-name/nvcfg       /mnt/vendor/nvcfg    ext4    noatime,nosuid,nodev,noauto_da_alloc,commit=1,nodelalloc                  wait,check,formattable
+
+# TKV store - stock line verbatim
+/dev/block/by-name/tkv         /tkv                emmc    defaults                                                                defaults
+
+# Misc - needed by update_engine
+/dev/block/by-name/misc         /misc               emmc    defaults                                                                defaults
+
+# Cache - tranfs backing, TWRP mountpoint (Fox settings persist in /cache)
+/dev/block/by-name/tranfs       /cache              ext4    noatime,nosuid,nodev,discard                                             wait,check,formattable
+
+# External SD card
+/dev/block/mmcblk1p1            /external_sd        vfat    defaults                                                                defaults
