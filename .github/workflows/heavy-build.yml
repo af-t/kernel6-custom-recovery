@@ -1,0 +1,123 @@
+name: heavy-build
+
+# One-time (or rare) full OrangeFox build producing the recovery fragment blob
+# consumed by the cheap patch pipeline. Manual dispatch ONLY: a full AOSP
+# manifest sync does not fit a routine CI budget. Never auto-runs on push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "Space-separated variants to build"
+        required: false
+        default: "X6885 X6886"
+      release_tag:
+        description: "Publish blobs to this release tag (empty = artifacts only)"
+        required: false
+        default: ""
+
+concurrency:
+  group: heavy-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      SYNC_DIR: ${{ github.workspace }}/fox_sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential curl flex \
+            g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick \
+            lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
+            libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
+            repo rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          git config --global user.email "ci@${{ github.repository_owner }}.local"
+          git config --global user.name "ci"
+          git config --global --add safe.directory '*'
+
+      - name: Sync Fox manifest (pinned by config/fox.json)
+        run: |
+          read -r MANIFEST_URL MANIFEST_BRANCH < <(python3 -c "
+          import json
+          m = json.load(open('config/fox.json'))['manifest']
+          print(m['url'], m['branch'])")
+          mkdir -p "$SYNC_DIR" && cd "$SYNC_DIR"
+          repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" \
+            --no-clone-bundle --no-tags
+          repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags --force-sync
+          git -C .repo/manifests rev-parse HEAD > "$GITHUB_WORKSPACE/manifest.sha"
+
+      - name: Overlay device tree and Fox patches
+        run: |
+          mkdir -p "$SYNC_DIR/device"
+          cp -r "$GITHUB_WORKSPACE/device/infinix" "$SYNC_DIR/device/"
+          shopt -s nullglob
+          for p in "$GITHUB_WORKSPACE"/patches/fox/*.patch; do
+            patch -p1 -d "$SYNC_DIR" < "$p"
+          done
+
+      - name: Build vendorbootimage per variant
+        run: |
+          cd "$SYNC_DIR"
+          export ALLOW_MISSING_DEPENDENCIES=true
+          source build/envsetup.sh
+          for V in ${{ inputs.variants }}; do
+            lunch "ofox_${V}-eng"
+            m vendorbootimage
+            cp "out/target/product/${V}/vendor_boot.img" \
+              "$GITHUB_WORKSPACE/vendor_boot-${V}-fox.img"
+          done
+
+      - name: Extract recovery fragments + BuildInfo
+        run: |
+          for V in ${{ inputs.variants }}; do
+            python3 scripts/patch-vendor-boot.py --extract \
+              "vendor_boot-${V}-fox.img" "recovery-${V}.bin"
+          done
+          {
+            echo "repo=${{ github.repository }}@${{ github.sha }}"
+            echo "manifest_sha=$(cat manifest.sha)"
+            echo "fox_json_sha=$(sha256sum config/fox.json | cut -d' ' -f1)"
+            echo "variants=${{ inputs.variants }}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > BuildInfo.txt
+          cat BuildInfo.txt
+          sha256sum vendor_boot-*-fox.img recovery-*.bin BuildInfo.txt | tee SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: heavy-build
+          path: |
+            vendor_boot-*-fox.img
+            recovery-*.bin
+            BuildInfo.txt
+            SHA256SUMS.txt
+
+      - name: Publish release
+        if: inputs.release_tag != ''
+        run: |
+          gh release create "${{ inputs.release_tag }}" --prerelease \
+            --title "${{ inputs.release_tag }}" \
+            --notes "OrangeFox recovery blobs for X6885/X6886. Feed recovery-<V>.bin into the patch pipeline via fragment_release/fragment_asset." \
+            vendor_boot-*-fox.img recovery-*.bin BuildInfo.txt SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
